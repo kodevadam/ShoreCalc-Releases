@@ -1,0 +1,46 @@
+name: Cleanup Old Dev Releases
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  KEEP_COUNT: 5
+
+jobs:
+  cleanup:
+    name: Prune old dev prereleases
+    runs-on: ubuntu-latest
+    # Only run when a new dev prerelease is published
+    if: github.event.release.prerelease == true
+    steps:
+      - name: Delete old dev prereleases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching dev prereleases..."
+          # List all prerelease tags matching dev-* sorted newest first
+          RELEASES=$(gh release list \
+            --repo "${{ github.repository }}" \
+            --limit 100 \
+            --json tagName,isPrerelease,createdAt \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("dev-")))] | sort_by(.createdAt) | reverse | .[].tagName')
+
+          COUNT=0
+          while IFS= read -r TAG; do
+            [ -z "$TAG" ] && continue
+            COUNT=$((COUNT + 1))
+            if [ "$COUNT" -gt "${{ env.KEEP_COUNT }}" ]; then
+              echo "Deleting old dev release: $TAG"
+              gh release delete "$TAG" \
+                --repo "${{ github.repository }}" \
+                --yes --cleanup-tag
+            else
+              echo "Keeping: $TAG ($COUNT/${{ env.KEEP_COUNT }})"
+            fi
+          done <<< "$RELEASES"
+
+          echo "Done. Kept ${{ env.KEEP_COUNT }} most recent dev releases."
